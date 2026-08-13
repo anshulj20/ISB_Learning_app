@@ -100,6 +100,24 @@ function cleanFilename(raw: string): string {
   return decodeURIComponent(base);
 }
 
+// True when the browser ended up displaying the file itself — e.g.
+// Chrome's built-in PDF viewer — rather than a Moodle page around it.
+// Confirmed via debug screenshots: several "resource" activities landed
+// here with no download event and no scannable page content (the
+// viewer's own UI, not real markup), because the activity's "Display"
+// setting just serves the file inline instead of forcing a download.
+function looksLikeDirectFile(url: string): boolean {
+  try {
+    const { pathname } = new URL(url);
+    return (
+      /\.(pdf|docx?|xlsx?|csv|pptx?|jpe?g|png|heic)$/i.test(pathname) ||
+      pathname.includes("pluginfile.php")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Downloads every real file reachable from an activity page (resource,
  * folder, or assignment). Two strategies, tried in order:
@@ -150,6 +168,27 @@ async function downloadActivityFiles(
   if (!pageRendered) {
     // The whole activity WAS the file — no page left to scan further.
     return saved;
+  }
+
+  // The page "rendered", but as the browser's own file viewer rather
+  // than a Moodle page — the current URL (after any redirects) IS the
+  // file. Fetch it directly instead of scanning what's just viewer UI.
+  if (looksLikeDirectFile(page.url())) {
+    const filename = cleanFilename(page.url());
+    if (!saved.includes(filename)) {
+      try {
+        const resp = await context.request.get(page.url());
+        if (resp.ok()) {
+          const buf = await resp.body();
+          await writeFile(path.join(destDir, filename), buf);
+          saved.push(filename);
+          console.log(`    ↓ ${filename} (direct file view)`);
+        }
+      } catch (err) {
+        console.log(`    ✗ couldn't fetch ${filename}: ${(err as Error).message}`);
+      }
+    }
+    return saved; // nothing else to scan — this WAS the whole activity
   }
 
   // Strategy 1: anything that looks like a direct file/download link on
