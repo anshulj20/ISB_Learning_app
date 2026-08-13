@@ -53,11 +53,71 @@ function parseArgs() {
 }
 
 type Activity = { type: string; id: string; name: string; href: string };
+type InlineFile = { url: string; section: string };
+
+// This course's page turned out to use collapsible accordion sections
+// (Course Materials / Practice Sets / Assignments / Quizzes) — the first
+// scrape only ever saw the Assignments section because that's what was
+// expanded by default, silently missing everything else (confirmed via
+// a screenshot of the real page). Click open anything collapsed before
+// scanning for content. Generic aria-expanded targeting, not tied to a
+// specific accordion plugin, so this should degrade harmlessly on
+// courses that don't use one.
+async function expandAllSections(page: Page): Promise<void> {
+  for (let pass = 0; pass < 3; pass++) {
+    const toggles = await page.$$('[aria-expanded="false"]');
+    if (toggles.length === 0) break;
+    for (const toggle of toggles) {
+      await toggle.click({ timeout: 1000 }).catch(() => {});
+    }
+    await politeDelay(400);
+  }
+}
+
+// Moodle folders shown in "inline" display mode put their files' real
+// pluginfile.php links directly in the course page's own HTML, NOT
+// wrapped in a /mod/folder/view.php activity — so listActivities()
+// (which only matches /mod/ links) misses them entirely. This is a
+// second, independent scan of the same page for those bare file links,
+// each tagged with its nearest preceding heading-like text (e.g.
+// "Session 01 & 02") for organizing on disk.
+async function listInlineFiles(page: Page): Promise<InlineFile[]> {
+  return page.evaluate(() => {
+    function isHeadingish(el: Element): boolean {
+      if (el.querySelector('a[href*="pluginfile.php"]')) return false;
+      const text = (el.textContent || "").trim();
+      if (!text || text.length > 80) return false;
+      return (
+        ["H1", "H2", "H3", "H4", "H5", "H6", "STRONG", "B", "LEGEND"].includes(el.tagName) ||
+        /session|practice|midterm|end.?term|week/i.test(text)
+      );
+    }
+
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    let currentSection = "course-materials";
+    const seen = new Map<string, string>(); // url -> section
+    let node = walker.currentNode as Element | null;
+    while (node) {
+      if (isHeadingish(node)) {
+        currentSection = (node.textContent || "").trim();
+      }
+      if (node.tagName === "A") {
+        const href = node.getAttribute("href") || "";
+        if (href.includes("pluginfile.php") && !seen.has(href)) {
+          seen.set(href, currentSection);
+        }
+      }
+      node = walker.nextNode() as Element | null;
+    }
+    return Array.from(seen.entries()).map(([url, section]) => ({ url, section }));
+  });
+}
 
 async function listActivities(page: Page, courseId: string): Promise<Activity[]> {
   await page.goto(`${ELEARN_BASE}/course/view.php?id=${courseId}`, {
     waitUntil: "domcontentloaded",
   });
+  await expandAllSections(page);
 
   return page.$$eval("a[href*='/mod/']", (links) => {
     // turnitintooltwo/turnitintool = Moodle's Turnitin plugin, for
@@ -360,6 +420,59 @@ async function main() {
       totalFiles++;
     }
     await politeDelay(500);
+  }
+
+  // Inline-displayed folder contents — a second pass over the course
+  // page itself, independent of the /mod/ activity loop above. See
+  // listInlineFiles()'s comment for why these need separate handling.
+  console.log(`\nChecking for inline folder contents on the course page...`);
+  await page.goto(`${ELEARN_BASE}/course/view.php?id=${courseId}`, { waitUntil: "domcontentloaded" });
+  await expandAllSections(page);
+  const inlineFiles = await listInlineFiles(page);
+  console.log(`Found ${inlineFiles.length} inline file(s) across ${new Set(inlineFiles.map((f) => f.section)).size} section(s).`);
+
+  for (const { url, section } of inlineFiles) {
+    const filename = cleanFilename(url);
+    const sectionDir = path.join(destDir, slugify(section));
+    const storedPath = path.join("files", "elearn", slugify(scrapedCourseName), slugify(section), filename);
+
+    const existing = await prisma.sourceFile.findFirst({ where: { storedPath } });
+    if (existing) {
+      console.log(`  (already queued from an earlier run: ${section} / ${filename})`);
+      continue;
+    }
+
+    try {
+      await mkdir(sectionDir, { recursive: true });
+      const resp = await context.request.get(resolveUrl(url));
+      if (!resp.ok()) {
+        console.log(`  ✗ ${section} / ${filename}: HTTP ${resp.status()}`);
+        continue;
+      }
+      const buf = await resp.body();
+      await writeFile(path.join(sectionDir, filename), buf);
+      console.log(`  ↓ ${section} / ${filename}`);
+    } catch (err) {
+      console.log(`  ✗ couldn't fetch ${section} / ${filename}: ${(err as Error).message}`);
+      continue;
+    }
+
+    const format = guessFormat(filename);
+    if (!format) {
+      console.log(`    (skipping DB row — unsupported format: ${filename})`);
+      continue;
+    }
+    await prisma.sourceFile.create({
+      data: {
+        originalFileName: filename,
+        storedPath,
+        kind: guessKind("resource", filename),
+        format,
+        status: "QUEUED",
+      },
+    });
+    totalFiles++;
+    await politeDelay(300);
   }
 
   console.log(`\nGrades:`);
