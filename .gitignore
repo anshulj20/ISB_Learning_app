@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# Local-first data — never belongs in git, even a private repo. Code is
+# backed up here; the actual archive (DB + uploaded files) is backed up
+# separately per PROJECT_SPEC.md's Storage & backup strategy.
+/prisma/dev.db
+/prisma/dev.db-journal
+*.db
+*.db-journal
+/files/
+

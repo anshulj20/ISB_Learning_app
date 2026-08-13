@@ -1,0 +1,280 @@
+// ISB Learning Inventory — data model.
+// See ../PROJECT_SPEC.md for the product context behind these choices.
+// Embeddings (for semantic search / the concept graph's similarity check)
+// live in a separate sqlite-vec virtual table, set up via raw SQL in
+// prisma/vec-setup.sql — Prisma's schema language doesn't model vec0
+// virtual tables, so that piece is intentionally outside this file.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Confidence {
+  HIGH
+  PARTIAL
+  THIN
+}
+
+enum FileKind {
+  SLIDES
+  NOTES
+  CASE
+  ASSIGNMENT
+}
+
+enum FileFormat {
+  PPTX
+  PDF
+  JPG
+  PNG
+  HEIC
+}
+
+enum FileStatus {
+  QUEUED
+  PROCESSING
+  PROCESSED
+  WAITING_FOR_QUOTA
+  ERROR
+}
+
+enum LinkStatus {
+  CONFIRMED
+  SUGGESTED
+}
+
+enum CreatedBy {
+  AI
+  USER
+}
+
+enum AnswerAuthor {
+  OWN
+  FACULTY
+}
+
+model Term {
+  id        String   @id @default(cuid())
+  name      String
+  order     Int
+  courses   Course[]
+  createdAt DateTime @default(now())
+}
+
+model Course {
+  id        String     @id @default(cuid())
+  term      Term       @relation(fields: [termId], references: [id])
+  termId    String
+  name      String
+  order     Int
+  topics    Topic[]
+  questions AssignmentQuestion[]
+  createdAt DateTime   @default(now())
+
+  @@index([termId])
+}
+
+// A recurring idea taught in more than one course (e.g. "Regression").
+// Only concepts with 2+ linked Topics are graph-worthy / interesting —
+// a Topic with no Concept just means "not (yet) known to recur."
+model Concept {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  createdBy CreatedBy     @default(AI)
+  topics    Topic[]
+  linksFrom ConceptLink[] @relation("LinkFrom")
+  linksTo   ConceptLink[] @relation("LinkTo")
+  createdAt DateTime      @default(now())
+}
+
+model ConceptLink {
+  id         String     @id @default(cuid())
+  conceptA   Concept    @relation("LinkFrom", fields: [conceptAId], references: [id])
+  conceptAId String
+  conceptB   Concept    @relation("LinkTo", fields: [conceptBId], references: [id])
+  conceptBId String
+  status     LinkStatus @default(SUGGESTED)
+  createdBy  CreatedBy  @default(AI)
+  createdAt  DateTime   @default(now())
+
+  @@unique([conceptAId, conceptBId])
+}
+
+model Topic {
+  id                   String     @id @default(cuid())
+  course               Course     @relation(fields: [courseId], references: [id])
+  courseId             String
+  concept              Concept?   @relation(fields: [conceptId], references: [id])
+  conceptId            String?
+  name                 String
+  order                Int
+  confidence           Confidence @default(THIN)
+  takeaway             String?
+  intentionallyBrief   Boolean    @default(false)
+  interviewShortlisted Boolean    @default(false)
+  verifiedByUser       Boolean    @default(false)
+  verifiedAt           DateTime?
+  lastOpenedAt         DateTime?
+  openCount            Int        @default(0)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  sections    KnowledgeSection[]
+  sourceFiles TopicSourceFile[]
+  userNotes   UserNote[]
+  visits      TopicVisit[]
+  readings    SuggestedReading[]
+  questions   AssignmentQuestion[]
+
+  @@index([courseId])
+  @@index([conceptId])
+}
+
+// A named subsection of a topic's detailed knowledge base (what Focus
+// Reading mode navigates between: "What a p-value is", "Worked example"...).
+model KnowledgeSection {
+  id               String    @id @default(cuid())
+  topic            Topic     @relation(fields: [topicId], references: [id])
+  topicId          String
+  heading          String
+  body             String
+  order            Int
+  verifiedByUser   Boolean   @default(false)
+  verifiedAt       DateTime?
+  userNotes        UserNote[]
+  transcriptBlocks TranscriptBlock[]
+
+  @@index([topicId])
+}
+
+// Always kept structurally distinct from generated content (spec: "never
+// silently merged into the synthesized text").
+model UserNote {
+  id        String            @id @default(cuid())
+  topic     Topic?            @relation(fields: [topicId], references: [id])
+  topicId   String?
+  section   KnowledgeSection? @relation(fields: [sectionId], references: [id])
+  sectionId String?
+  text      String
+  createdAt DateTime          @default(now())
+}
+
+model SourceFile {
+  id               String     @id @default(cuid())
+  originalFileName String
+  storedPath       String
+  kind             FileKind
+  format           FileFormat
+  status           FileStatus @default(QUEUED)
+  uploadedAt       DateTime   @default(now())
+  processedAt      DateTime?
+
+  topics           TopicSourceFile[]
+  handwritingPages HandwritingPage[]
+  answers          AssignmentAnswer[]
+}
+
+model TopicSourceFile {
+  id           String     @id @default(cuid())
+  topic        Topic      @relation(fields: [topicId], references: [id])
+  topicId      String
+  sourceFile   SourceFile @relation(fields: [sourceFileId], references: [id])
+  sourceFileId String
+  citation     String? // e.g. "slide 11", "page 3"
+
+  @@unique([topicId, sourceFileId])
+}
+
+model HandwritingPage {
+  id             String     @id @default(cuid())
+  sourceFile     SourceFile @relation(fields: [sourceFileId], references: [id])
+  sourceFileId   String
+  pageNumber     Int
+  imagePath      String
+  transcriptText String?
+  blocks         TranscriptBlock[]
+
+  @@index([sourceFileId])
+}
+
+// Block-level provenance: which part of the topic each transcribed chunk
+// feeds, and whether any of it is [unread] (never guessed, per spec).
+model TranscriptBlock {
+  id             String            @id @default(cuid())
+  page           HandwritingPage   @relation(fields: [pageId], references: [id])
+  pageId         String
+  text           String
+  hasUnread      Boolean           @default(false)
+  order          Int
+  feedsSection   KnowledgeSection? @relation(fields: [feedsSectionId], references: [id])
+  feedsSectionId String?
+
+  @@index([pageId])
+}
+
+model AssignmentQuestion {
+  id       String   @id @default(cuid())
+  course   Course   @relation(fields: [courseId], references: [id])
+  courseId String
+  topic    Topic?   @relation(fields: [topicId], references: [id])
+  topicId  String?
+  number   Int
+  text     String
+  answers  AssignmentAnswer[]
+
+  @@index([courseId])
+}
+
+model AssignmentAnswer {
+  id           String       @id @default(cuid())
+  question     AssignmentQuestion @relation(fields: [questionId], references: [id])
+  questionId   String
+  author       AnswerAuthor
+  text         String
+  grade        Float?
+  gradeMax     Float?
+  markerNote   String?
+  submittedAt  DateTime?
+  sourceFile   SourceFile?  @relation(fields: [sourceFileId], references: [id])
+  sourceFileId String?
+
+  @@index([questionId])
+}
+
+model TopicVisit {
+  id        String   @id @default(cuid())
+  topic     Topic    @relation(fields: [topicId], references: [id])
+  topicId   String
+  visitedAt DateTime @default(now())
+
+  @@index([topicId])
+}
+
+// Links only — never scraped article content (spec: Copyright / retention stance).
+model SuggestedReading {
+  id           String   @id @default(cuid())
+  topic        Topic    @relation(fields: [topicId], references: [id])
+  topicId      String
+  title        String
+  url          String
+  sourceDomain String
+  createdAt    DateTime @default(now())
+
+  @@index([topicId])
+}
+
+// Backs the "14 / 20 free files used today" display and the hard-stop
+// queue/auto-resume behavior. One row per calendar day.
+model QuotaUsage {
+  id       String   @id @default(cuid())
+  date     String   @unique // "2026-08-13"
+  provider String   @default("gemini")
+  used     Int      @default(0)
+  limit    Int      @default(20)
+  resetAt  DateTime
+}

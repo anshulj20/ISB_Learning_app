@@ -1,17 +1,28 @@
 {
-  "name": "isb-temp-scaffold",
+  "name": "isb-learning-inventory",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3010",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -p 3010",
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "better-sqlite3": "^13.0.3",
     "next": "16.3.0",
+    "prisma": "^7.9.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "sqlite-vec": "^0.1.9",
+    "tsx": "^4.23.12",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -22,5 +33,13 @@
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "better-sqlite3@13.0.3": true,
+    "@prisma/engines@7.9.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@7.9.1": true,
+    "unrs-resolver@1.12.2": true
   }
 }
