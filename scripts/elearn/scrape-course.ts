@@ -166,6 +166,28 @@ function guessKind(activityType: string, filename: string): FileKind {
   return "SLIDES"; // default guess for resource/folder — reviewed later
 }
 
+// Moodle's <title> tag for a course page carries junk that shouldn't be
+// part of the stored course name: a leading zero-width space and a
+// trailing " | ISB" site suffix. Left uncleaned, re-scraping a course
+// whose name was later tidied up by hand (during Phase-1 processing)
+// stops matching on the next run and creates a duplicate empty course
+// row instead of finding the existing one — confirmed to actually
+// happen, not just a theoretical risk.
+const ZERO_WIDTH_CODEPOINTS = new Set([0x200b, 0x200c, 0x200d, 0xfeff]);
+
+function cleanCourseName(raw: string): string {
+  // Moodle's <title> text for this site leads with an invisible
+  // character (zero-width space / ZWNJ / ZWJ / BOM, varies) and trails
+  // with " | ISB". Stripped via explicit code-point comparison — not a
+  // regex character class with the invisible glyph pasted in, which is
+  // impossible to eyeball-verify as correct in a code review.
+  let s = raw;
+  while (s.length > 0 && ZERO_WIDTH_CODEPOINTS.has(s.charCodeAt(0))) {
+    s = s.slice(1);
+  }
+  return s.replace(/\s*\|\s*ISB\s*$/i, "").trim();
+}
+
 function guessFormat(filename: string): FileFormat | null {
   const ext = path.extname(filename).toLowerCase();
   return EXT_TO_FORMAT[ext] ?? null;
@@ -436,8 +458,7 @@ async function main() {
   console.log(`\nReading course ${courseId}...`);
   const activities = await listActivities(page, courseId);
   const scrapedCourseName =
-    courseNameOverride ??
-    (await page.title()).replace(/^.*?:\s*/, "").trim() ??
+    courseNameOverride ?? cleanCourseName((await page.title()).replace(/^.*?:\s*/, "").trim()) ??
     `Course ${courseId}`;
 
   console.log(`Course: "${scrapedCourseName}" — ${activities.length} file-bearing activities found`);
