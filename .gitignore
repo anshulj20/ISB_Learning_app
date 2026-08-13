@@ -56,3 +56,9 @@ next-env.d.ts
 /.playwright-profile/
 scripts/elearn/debug-*.png
 
+# Personal screenshots/scans dropped directly in the project root for
+# reference (e.g. "ss of ...") — same reasoning as /files/, never git.
+ss*.pdf
+ss*.png
+ss*.jpg
+
