@@ -8,13 +8,19 @@ import { getTodayQuota } from "@/lib/quota";
 
 const FILES_ROOT = path.join(process.cwd(), "files", "inbox");
 
-const EXT_TO_FORMAT: Record<string, "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC"> = {
+const EXT_TO_FORMAT: Record<
+  string,
+  "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV"
+> = {
   ".pptx": "PPTX",
   ".pdf": "PDF",
   ".jpg": "JPG",
   ".jpeg": "JPG",
   ".png": "PNG",
   ".heic": "HEIC",
+  ".docx": "DOCX",
+  ".xlsx": "XLSX",
+  ".csv": "CSV",
 };
 
 // Real file storage, real DB rows — but this does NOT run any AI

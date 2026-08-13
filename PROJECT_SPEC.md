@@ -121,11 +121,22 @@ The 13 screens, in the order the mockup presents them:
 ## Content sources & formats
 
 - Slides (PPTX)
-- Personal notes — **majorly handwritten**, photographed/scanned (images)
-- Assignment objectives
-- Assignment solutions — **both** the user's own submissions and faculty's
-  model answers, kept distinguishable
+- Personal notes — **majorly handwritten**, photographed/scanned (images:
+  JPG/PNG/HEIC)
+- Assignment objectives and solutions — **both** the user's own
+  submissions and faculty's model answers, kept distinguishable. In
+  practice these arrive as PDF or **Word (DOCX)**.
 - Coursepacks / cases (PDF)
+- Data/reference files from courses (e.g. datasets referenced in
+  problem sets) — **Excel (XLSX) and CSV**
+
+Supported formats: PPTX, PDF, DOCX, XLSX, CSV, JPG, PNG, HEIC — widened
+from the original PDF/image/PPTX-only scope once real eLearn material
+(Word assignment answers, Excel datasets) started coming through the
+scraper. DOCX/XLSX/CSV aren't in the original design mockup's content
+model — fine, the underlying `FileFormat` schema enum was designed to
+extend easily (SQLite enums are Prisma-Client-side only, no migration
+needed to add a value, see PROJECT_STATUS.md).
 
 ## Features
 

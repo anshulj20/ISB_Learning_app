@@ -39,16 +39,17 @@ export default async function AddPage() {
       <form action={uploadFiles} className="mb-8">
         <div className="border-2 border-dashed border-divider rounded-lg p-10 text-center mb-4">
           <p className="text-base mb-1">
-            Drop slides, PDFs, or photos of your notes
+            Drop slides, PDFs, docs, spreadsheets, or photos of your notes
           </p>
           <p className="text-xs text-text/40 mb-5">
-            PPTX · PDF · JPG · PNG · HEIC — up to 40 files at a time
+            PPTX · PDF · DOCX · XLSX · CSV · JPG · PNG · HEIC — up to 40 files
+            at a time
           </p>
           <input
             type="file"
             name="files"
             multiple
-            accept=".pptx,.pdf,.jpg,.jpeg,.png,.heic"
+            accept=".pptx,.pdf,.docx,.xlsx,.csv,.jpg,.jpeg,.png,.heic"
             className="block mx-auto text-sm mb-4"
           />
           <div className="flex items-center justify-center gap-3">

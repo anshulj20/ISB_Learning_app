@@ -19,7 +19,7 @@ import type { Page, BrowserContext } from "playwright";
 import { getLoggedInPage, ELEARN_BASE, db, slugify, politeDelay, resolveUrl } from "./shared";
 
 type FileKind = "SLIDES" | "NOTES" | "CASE" | "ASSIGNMENT";
-type FileFormat = "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC";
+type FileFormat = "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV";
 
 const EXT_TO_FORMAT: Record<string, FileFormat> = {
   ".pptx": "PPTX",
@@ -28,6 +28,9 @@ const EXT_TO_FORMAT: Record<string, FileFormat> = {
   ".jpeg": "JPG",
   ".png": "PNG",
   ".heic": "HEIC",
+  ".docx": "DOCX",
+  ".xlsx": "XLSX",
+  ".csv": "CSV",
 };
 
 function parseArgs() {
