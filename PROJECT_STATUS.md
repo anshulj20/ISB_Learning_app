@@ -143,7 +143,18 @@ continue?" interstitial that needed a second hop to reach the real file
 (caught by the user manually clicking through it and comparing — the
 scraper's own checks didn't catch this one, worth remembering that the
 coverage-check only validates against patterns it already knows to look
-for, not "everything a human would find by clicking around").
+for, not "everything a human would find by clicking around"), and —
+important — that same interstitial's actual destination once crashed
+the entire browser mid-navigation ("Target page, context or browser has
+been closed"), killing every remaining activity in that run too. The
+scraper is now crash-resilient throughout: every phase (each activity,
+grades, the coverage audit, the inline-files scan) is independently
+try/caught, so one bad activity can no longer take down a whole run —
+it gets logged in a clear failure summary instead. Worth keeping in
+mind for future courses: a `url`-type activity's real destination is
+the least predictable part of this whole pipeline (external site,
+outside ISB's control) — expect the occasional one that just doesn't
+work, and don't chase every single one to perfection.
 
 ## Real content currently in the app
 
