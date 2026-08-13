@@ -24,6 +24,17 @@ export function db() {
   return new PrismaClient({ adapter });
 }
 
+// A real "we're back on elearn.isb.edu, past its login page" check — NOT
+// just "URL doesn't contain /login/". That looser check was the bug:
+// clicking "Microsoft O365 Login" immediately jumps the browser to
+// login.microsoftonline.com, whose URLs also don't contain "/login/", so
+// the old check declared success the instant the button was clicked —
+// before any credentials or MFA were even entered — then raced ahead
+// while the human was still mid-login.
+function isPastLogin(url: URL): boolean {
+  return url.hostname === "elearn.isb.edu" && !url.pathname.startsWith("/login/");
+}
+
 export async function getLoggedInPage(): Promise<{
   context: BrowserContext;
   page: Page;
@@ -36,8 +47,7 @@ export async function getLoggedInPage(): Promise<{
 
   await page.goto(`${ELEARN_BASE}/my/`, { waitUntil: "domcontentloaded" });
 
-  const alreadyLoggedIn = !page.url().includes("/login/");
-  if (alreadyLoggedIn) {
+  if (isPastLogin(new URL(page.url()))) {
     console.log("✓ Already logged in (reused saved session).");
     return { context, page };
   }
@@ -49,17 +59,26 @@ export async function getLoggedInPage(): Promise<{
   console.log("  2. Complete your normal ISB Microsoft login, including MFA.");
   console.log("This script will detect it and continue automatically —");
   console.log(`  waiting up to ${LOGIN_WAIT_TIMEOUT_MS / 60000} minutes.`);
+  console.log("  (Take your time — it now genuinely waits for you to land");
+  console.log("   back on elearn.isb.edu, not just for the button click.)");
   console.log("───────────────────────────────────────────────────────────");
   console.log("");
 
-  await page.waitForURL((url) => !url.pathname.includes("/login/"), {
-    timeout: LOGIN_WAIT_TIMEOUT_MS,
-  });
+  // Wait for real completion, then double-check it wasn't a transient
+  // bounce (e.g. a brief /auth/oidc/ callback hop that redirects back to
+  // /login/ on failure) before trusting it.
+  let confirmed = false;
+  while (!confirmed) {
+    await page.waitForURL((url) => isPastLogin(url), { timeout: LOGIN_WAIT_TIMEOUT_MS });
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(1500);
+    confirmed = isPastLogin(new URL(page.url()));
+    if (!confirmed) {
+      console.log("  (bounced back to login — still waiting for it to actually complete...)");
+    }
+  }
 
-  // Give the dashboard a moment to fully render before we start scraping.
-  await page.waitForLoadState("domcontentloaded");
   console.log("✓ Logged in. Session saved for next time.");
-
   return { context, page };
 }
 
