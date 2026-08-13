@@ -60,7 +60,13 @@ async function listActivities(page: Page, courseId: string): Promise<Activity[]>
   });
 
   return page.$$eval("a[href*='/mod/']", (links) => {
-    const wanted = ["resource", "folder", "assign"];
+    // turnitintooltwo/turnitintool = Moodle's Turnitin plugin, for
+    // courses that route submissions through Turnitin instead of a
+    // plain "assign" activity. Untested — no course scraped so far has
+    // used it, so the download strategies may need adjusting once one
+    // actually does (Turnitin's own submission-inbox UI is more complex
+    // than a plain Moodle assign page).
+    const wanted = ["resource", "folder", "assign", "turnitintooltwo", "turnitintool"];
     const seen = new Map<string, { type: string; id: string; name: string; href: string }>();
     for (const a of links) {
       const href = a.getAttribute("href") ?? "";
@@ -79,7 +85,7 @@ async function listActivities(page: Page, courseId: string): Promise<Activity[]>
 }
 
 function guessKind(activityType: string, filename: string): FileKind {
-  if (activityType === "assign") return "ASSIGNMENT";
+  if (["assign", "turnitintooltwo", "turnitintool"].includes(activityType)) return "ASSIGNMENT";
   const lower = filename.toLowerCase();
   if (lower.includes("case")) return "CASE";
   if (lower.match(/\.(jpg|jpeg|png|heic)$/)) return "NOTES";
