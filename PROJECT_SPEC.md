@@ -273,21 +273,47 @@ deliberate future decision, not something to leave a door open for today.)
 ## eLearn extraction
 
 Platform: **Moodle**, at `https://elearn.isb.edu` (confirmed via the
-public login page footer — "Powered by Moodle" — no credentials involved
-in that check). Moodle has well-documented, consistent URL patterns for
-course listings, resource/file downloads, and grade reports, which makes
-this straightforward to script.
+public login page footer — "Powered by Moodle"). Login is **not** plain
+Moodle username/password — the login page offers "Log in using your
+account on: Microsoft O365 Login", redirecting to
+`elearn.isb.edu/auth/oidc/?source=loginpage` (OpenID Connect against
+ISB's Microsoft 365 tenant). An institutional M365 tenant almost
+certainly enforces MFA, which **cannot and should not be automated** —
+confirmed via the public login page only, no credentials involved in
+that check.
 
-The user will pull course material out using a **locally-run script**
-(e.g. Playwright), written by Claude Code but **run by the user on their
-own machine**, with the user's own credentials entered locally — the
-credential is never seen by or sent to Claude/Anthropic. Also needs to
-pull the **grades section** per assignment (feeds the confidence-scoring
-input above; Moodle exposes this via its per-course grade report page).
+Consequently the scraper (`scripts/elearn/`) is built around a
+**persistent, visible browser session**, not stored credentials:
+- Uses Playwright's `launchPersistentContext` with a local profile
+  directory (`.playwright-profile/`, gitignored) so a login session
+  survives across separate script runs.
+- Opens a **real, visible** Chromium window. If not already logged in,
+  the script pauses and waits — the user completes the Microsoft
+  login/MFA themselves, by hand, in that real window. The credential
+  and MFA step never touch Claude or any script code.
+- Once logged in, the saved session cookie persists in the profile
+  directory, so subsequent runs (scraping the next course) skip
+  straight past login until the session naturally expires — at which
+  point the same manual-login pause happens again.
 
-Before writing this script: check whether the `ISB Courses` and
-`Class case studies` folders already on the user's desktop are manually-
-saved eLearn material — could shortcut some of the scraping if so.
+Also pulls the **grades report** per course (Moodle's
+`/grade/report/user/index.php?id=<courseId>`) — feeds the
+confidence-scoring input above.
+
+**Scraped one course at a time**, per the user's explicit instruction —
+no "scrape everything" bulk mode. `scripts/elearn/list-courses.ts`
+prints enrolled courses with their Moodle course IDs;
+`scripts/elearn/scrape-course.ts <courseId> --term "Term N"` scrapes one.
+
+Downloaded files land in `files/elearn/<course-slug>/` and get a
+`SourceFile` row each (status `QUEUED`, kind best-guessed from the
+Moodle activity type — reviewed and corrected during Phase-1 processing,
+not treated as final). Kind-guessing being imperfect is fine; it's the
+same "ask when unsure" philosophy as the rest of ingestion.
+
+The `ISB Courses` and `Class case studies` desktop folders are still
+untouched, per the user's instruction — revisit once eLearn scraping is
+underway to see if they shortcut anything.
 
 Flagged risk: bulk-downloading a full program's coursepacks/cases this
 way may sit in a gray area against ISB's platform ToS and the licensing

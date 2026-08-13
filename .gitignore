@@ -51,3 +51,8 @@ next-env.d.ts
 *.db-journal
 /files/
 
+# eLearn scraper — persistent login session (real session cookies, must
+# never leave this machine) and ad-hoc debug screenshots.
+/.playwright-profile/
+scripts/elearn/debug-*.png
+

@@ -1,0 +1,76 @@
+// Shared helpers for the eLearn scraper scripts. See PROJECT_SPEC.md
+// "eLearn extraction" for the why behind this design.
+//
+// IMPORTANT: this never touches your ISB credentials or MFA. It opens a
+// real, visible Chromium window; if you're not already logged in, YOU
+// log in by hand in that window (including any MFA step), and the
+// script just waits for that to finish. The session is then saved to a
+// local profile folder (.playwright-profile/, gitignored) so future
+// runs skip straight past login until the session naturally expires.
+
+import { chromium, type Page, type BrowserContext } from "playwright";
+import path from "path";
+import { PrismaClient } from "../../src/generated/prisma/client";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+
+export const ELEARN_BASE = "https://elearn.isb.edu";
+const PROFILE_DIR = path.join(process.cwd(), ".playwright-profile", "elearn");
+const LOGIN_WAIT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes to complete login/MFA by hand
+
+export function db() {
+  const adapter = new PrismaBetterSqlite3({
+    url: process.env.DATABASE_URL ?? "file:./dev.db",
+  });
+  return new PrismaClient({ adapter });
+}
+
+export async function getLoggedInPage(): Promise<{
+  context: BrowserContext;
+  page: Page;
+}> {
+  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+    headless: false, // always visible — you may need to act in it (login, MFA)
+    viewport: { width: 1280, height: 900 },
+  });
+  const page = context.pages()[0] ?? (await context.newPage());
+
+  await page.goto(`${ELEARN_BASE}/my/`, { waitUntil: "domcontentloaded" });
+
+  const alreadyLoggedIn = !page.url().includes("/login/");
+  if (alreadyLoggedIn) {
+    console.log("✓ Already logged in (reused saved session).");
+    return { context, page };
+  }
+
+  console.log("");
+  console.log("── Login needed ──────────────────────────────────────────");
+  console.log("A Chromium window has opened. Please:");
+  console.log('  1. Click "Log in using your account on: Microsoft O365 Login"');
+  console.log("  2. Complete your normal ISB Microsoft login, including MFA.");
+  console.log("This script will detect it and continue automatically —");
+  console.log(`  waiting up to ${LOGIN_WAIT_TIMEOUT_MS / 60000} minutes.`);
+  console.log("───────────────────────────────────────────────────────────");
+  console.log("");
+
+  await page.waitForURL((url) => !url.pathname.includes("/login/"), {
+    timeout: LOGIN_WAIT_TIMEOUT_MS,
+  });
+
+  // Give the dashboard a moment to fully render before we start scraping.
+  await page.waitForLoadState("domcontentloaded");
+  console.log("✓ Logged in. Session saved for next time.");
+
+  return { context, page };
+}
+
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+export function politeDelay(ms = 600): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
