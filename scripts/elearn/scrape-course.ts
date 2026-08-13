@@ -84,6 +84,13 @@ async function expandAllSections(page: Page): Promise<void> {
 async function listInlineFiles(page: Page): Promise<InlineFile[]> {
   return page.evaluate(() => {
     function isHeadingish(el: Element): boolean {
+      // A link is never a heading — without this, a file link whose own
+      // text happens to match the heading regex below (e.g. a file
+      // literally named "Practice_set_1_solutions.pdf") gets read as
+      // its own section label, one line before it's tagged with that
+      // same label. Confirmed bug: that's exactly what happened to
+      // every Practice Set file in the first real run.
+      if (el.tagName === "A") return false;
       if (el.querySelector('a[href*="pluginfile.php"]')) return false;
       const text = (el.textContent || "").trim();
       if (!text || text.length > 80) return false;
