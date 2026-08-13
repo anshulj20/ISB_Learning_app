@@ -88,6 +88,15 @@ function guessFormat(filename: string): FileFormat | null {
   return EXT_TO_FORMAT[ext] ?? null;
 }
 
+// Moodle file URLs often carry a trailing query string (e.g.
+// "?forcedownload=1") — strip it before treating the tail as a
+// filename, or Windows rejects the "?" and every write fails.
+function cleanFilename(raw: string): string {
+  const withoutQuery = raw.split("?")[0];
+  const base = withoutQuery.split("/").pop() || "file";
+  return decodeURIComponent(base);
+}
+
 /**
  * Downloads every real file reachable from an activity page (resource,
  * folder, or assignment). Two strategies, tried in order:
@@ -104,8 +113,41 @@ async function downloadActivityFiles(
   destDir: string,
   debug: boolean
 ): Promise<string[]> {
-  await page.goto(resolveUrl(activity.href), { waitUntil: "domcontentloaded" });
   const saved: string[] = [];
+  const activityUrl = resolveUrl(activity.href);
+
+  // Navigating to the activity's own page can itself BE the download —
+  // Moodle "force download" resources never render a page at all; the
+  // navigation gets replaced by a download, which Playwright surfaces as
+  // an error on goto() ("Download is starting"), not a normal event.
+  // That's what crashed the first real run: this wasn't caught here,
+  // only inside the click-loop below, so it propagated all the way up
+  // and killed the whole script instead of just skipping this activity.
+  const initialDownloadPromise = page
+    .waitForEvent("download", { timeout: 5000 })
+    .catch(() => null);
+  let pageRendered = true;
+  try {
+    await page.goto(activityUrl, { waitUntil: "domcontentloaded" });
+  } catch (err) {
+    if (err instanceof Error && /Download is starting/i.test(err.message)) {
+      pageRendered = false;
+    } else {
+      throw err;
+    }
+  }
+  const initialDownload = await initialDownloadPromise;
+  if (initialDownload) {
+    const filename = cleanFilename(initialDownload.suggestedFilename());
+    await initialDownload.saveAs(path.join(destDir, filename));
+    saved.push(filename);
+    console.log(`    ↓ ${filename}`);
+  }
+
+  if (!pageRendered) {
+    // The whole activity WAS the file — no page left to scan further.
+    return saved;
+  }
 
   // Strategy 1: anything that looks like a direct file/download link on
   // this page — try clicking each and see if a download fires.
@@ -122,11 +164,12 @@ async function downloadActivityFiles(
       }).catch(() => {}); // navigation may be interrupted by the download itself — fine
       const download = await downloadPromise.catch(() => null);
       if (download) {
-        const filename = download.suggestedFilename();
-        const dest = path.join(destDir, filename);
-        await download.saveAs(dest);
-        saved.push(filename);
-        console.log(`    ↓ ${filename}`);
+        const filename = cleanFilename(download.suggestedFilename());
+        if (!saved.includes(filename)) {
+          await download.saveAs(path.join(destDir, filename));
+          saved.push(filename);
+          console.log(`    ↓ ${filename}`);
+        }
       }
     } catch {
       // not a download link — fine, other strategy or link may cover it
@@ -137,7 +180,7 @@ async function downloadActivityFiles(
   // Strategy 2: direct fetch of any pluginfile.php URL still visible on
   // the (possibly navigated-away) activity page, for inline-displayed
   // files strategy 1 didn't catch.
-  await page.goto(resolveUrl(activity.href), { waitUntil: "domcontentloaded" });
+  await page.goto(activityUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
   const fileUrls = await page.$$eval(
     "a[href*='pluginfile.php'], iframe[src*='pluginfile.php'], object[data*='pluginfile.php']",
     (els) =>
@@ -146,7 +189,7 @@ async function downloadActivityFiles(
         .filter((u): u is string => !!u)
   );
   for (const url of new Set(fileUrls)) {
-    const filename = decodeURIComponent(url.split("/").pop() ?? "file");
+    const filename = cleanFilename(url);
     if (saved.includes(filename)) continue;
     try {
       const resp = await context.request.get(resolveUrl(url));
@@ -162,10 +205,13 @@ async function downloadActivityFiles(
     await politeDelay(300);
   }
 
-  if (saved.length === 0 && debug) {
-    const shotName = `debug-${activity.type}-${activity.id}.png`;
-    await page.screenshot({ path: path.join("scripts/elearn", shotName) });
-    console.log(`    (nothing found — screenshot saved to scripts/elearn/${shotName})`);
+  if (saved.length === 0) {
+    console.log(`    (nothing found for this activity)`);
+    if (debug) {
+      const shotName = `debug-${activity.type}-${activity.id}.png`;
+      await page.screenshot({ path: path.join("scripts/elearn", shotName) });
+      console.log(`    screenshot saved to scripts/elearn/${shotName}`);
+    }
   }
 
   return saved;
@@ -243,10 +289,21 @@ async function main() {
         continue;
       }
       const kind = guessKind(activity.type, filename);
+      const storedPath = path.join("files", "elearn", slugify(scrapedCourseName), filename);
+
+      // Re-running a course (likely, given how much retrying a first
+      // scrape tends to need) shouldn't create duplicate rows for files
+      // already queued from an earlier attempt.
+      const existing = await prisma.sourceFile.findFirst({ where: { storedPath } });
+      if (existing) {
+        console.log(`    (already queued from an earlier run: ${filename})`);
+        continue;
+      }
+
       await prisma.sourceFile.create({
         data: {
           originalFileName: filename,
-          storedPath: path.join("files", "elearn", slugify(scrapedCourseName), filename),
+          storedPath,
           kind,
           format,
           status: "QUEUED",
