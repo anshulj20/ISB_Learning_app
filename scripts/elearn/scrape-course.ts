@@ -287,7 +287,7 @@ async function downloadActivityFiles(
   // have already left it), so look for a continue-style link and follow
   // it once. Everything below (direct-file-view check, strategies 1/2)
   // then naturally re-evaluates against wherever that second click lands.
-  if (activity.type === "url" && new URL(page.url()).hostname === "elearn.isb.edu") {
+  if (activity.type === "url" && page.url().startsWith(ELEARN_BASE)) {
     const continueHref = await page.evaluate(() => {
       const workaround = document.querySelector<HTMLAnchorElement>(".urlworkaround a");
       if (workaround) return workaround.getAttribute("href");
@@ -295,15 +295,24 @@ async function downloadActivityFiles(
         /continue/i.test(a.textContent || "")
       );
       return byText ? byText.getAttribute("href") : null;
-    });
+    }).catch(() => null);
     if (continueHref) {
       const continueDownloadPromise = page
         .waitForEvent("download", { timeout: 5000 })
         .catch(() => null);
       try {
-        await page.goto(resolveUrl(continueHref), { waitUntil: "domcontentloaded" });
+        await page.goto(resolveUrl(continueHref), { waitUntil: "domcontentloaded", timeout: 15000 });
       } catch (err) {
-        if (!(err instanceof Error && /Download is starting/i.test(err.message))) throw err;
+        if (err instanceof Error && /Download is starting/i.test(err.message)) {
+          // fine — the download event promise below still resolves it
+        } else {
+          // Whatever this destination is (crashed the whole browser once
+          // already — "Target page, context or browser has been closed"),
+          // it isn't worth taking the run down over. Log and move on;
+          // this activity just yields nothing, same as any other.
+          console.log(`    ✗ continue-link navigation failed: ${(err as Error).message}`);
+          return saved;
+        }
       }
       const continueDownload = await continueDownloadPromise;
       if (continueDownload) {
@@ -534,10 +543,26 @@ async function main() {
   const processedFileUrls = new Set<string>();
 
   let totalFiles = 0;
+  const failedActivities: { name: string; error: string }[] = [];
   for (const activity of activities) {
     console.log(`\n  [${activity.type}] ${activity.name}`);
     processedModKeys.add(`${activity.type}-${activity.id}`);
-    const filenames = await downloadActivityFiles(page, context, activity, destDir, debug);
+
+    let filenames: string[] = [];
+    try {
+      filenames = await downloadActivityFiles(page, context, activity, destDir, debug);
+    } catch (err) {
+      // One activity's failure must never take the whole run down —
+      // confirmed real: a 'url' activity's destination once closed the
+      // entire browser mid-navigation ("Target page, context or browser
+      // has been closed"), killing every activity after it in that run
+      // too. Log clearly, record it, move on — a full summary of what
+      // failed prints at the end instead of silence or a crash.
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`    ✗ activity failed, skipping: ${message}`);
+      failedActivities.push({ name: activity.name, error: message });
+      continue;
+    }
     for (const filename of filenames) {
       const format = guessFormat(filename);
       if (!format) {
@@ -574,10 +599,15 @@ async function main() {
   // page itself, independent of the /mod/ activity loop above. See
   // listInlineFiles()'s comment for why these need separate handling.
   console.log(`\nChecking for inline folder contents on the course page...`);
-  await page.goto(`${ELEARN_BASE}/course/view.php?id=${courseId}`, { waitUntil: "domcontentloaded" });
-  await expandAllSections(page);
-  const inlineFiles = await listInlineFiles(page);
-  console.log(`Found ${inlineFiles.length} inline file(s) across ${new Set(inlineFiles.map((f) => f.section)).size} section(s).`);
+  let inlineFiles: InlineFile[] = [];
+  try {
+    await page.goto(`${ELEARN_BASE}/course/view.php?id=${courseId}`, { waitUntil: "domcontentloaded" });
+    await expandAllSections(page);
+    inlineFiles = await listInlineFiles(page);
+    console.log(`Found ${inlineFiles.length} inline file(s) across ${new Set(inlineFiles.map((f) => f.section)).size} section(s).`);
+  } catch (err) {
+    console.log(`  ✗ inline-files scan failed: ${(err as Error).message}`);
+  }
 
   for (const { url, section } of inlineFiles) {
     processedFileUrls.add(url);
@@ -625,9 +655,22 @@ async function main() {
   }
 
   console.log(`\nGrades:`);
-  await scrapeGrades(page, courseId, destDir);
+  try {
+    await scrapeGrades(page, courseId, destDir);
+  } catch (err) {
+    console.log(`  ✗ grades step failed: ${(err as Error).message}`);
+  }
 
-  await auditCoverage(page, courseId, processedModKeys, processedFileUrls);
+  try {
+    await auditCoverage(page, courseId, processedModKeys, processedFileUrls);
+  } catch (err) {
+    console.log(`\nCoverage check failed to run: ${(err as Error).message}`);
+  }
+
+  if (failedActivities.length > 0) {
+    console.log(`\n⚠ ${failedActivities.length} activit${failedActivities.length === 1 ? "y" : "ies"} failed outright (not just \"nothing found\" — an actual error):`);
+    for (const f of failedActivities) console.log(`  - ${f.name}: ${f.error}`);
+  }
 
   console.log(`\n✓ Done. ${totalFiles} file(s) saved to ${destDir} and queued in the app.`);
   console.log(`  Review kind/confidence during Phase-1 processing — guesses here are rough.`);
