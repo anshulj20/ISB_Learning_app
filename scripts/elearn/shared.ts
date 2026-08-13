@@ -43,6 +43,17 @@ export async function getLoggedInPage(): Promise<{
     headless: false, // always visible — you may need to act in it (login, MFA)
     viewport: { width: 1280, height: 900 },
   });
+
+  // tsx transpiles with esbuild's "keep names" behavior, which injects
+  // __name(fn, "name") calls into functions. page.evaluate()/$$eval()
+  // serialize a function's source and run it standalone in the browser,
+  // where __name doesn't exist — ReferenceError. Shim it as a no-op
+  // before any page code runs. Passed as a raw string (not a function)
+  // so THIS injection itself isn't transpiled/wrapped the same way.
+  await context.addInitScript(
+    "window.__name = window.__name || function(fn) { return fn; };"
+  );
+
   const page = context.pages()[0] ?? (await context.newPage());
 
   await page.goto(`${ELEARN_BASE}/my/`, { waitUntil: "domcontentloaded" });
