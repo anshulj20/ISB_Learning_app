@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const ITEMS = [
   { href: "/", label: "Home" },
@@ -47,9 +48,12 @@ export function Nav({ topicCount }: { topicCount: number }) {
           })}
         </ul>
       </div>
-      <div className="text-xs text-text/50 px-2">
-        <div className="text-lg font-heading text-text/80">{topicCount}</div>
-        topics
+      <div>
+        <div className="text-xs text-text/50 px-2 mb-4">
+          <div className="text-lg font-heading text-text/80">{topicCount}</div>
+          topics
+        </div>
+        <ThemeToggle />
       </div>
     </nav>
   );
