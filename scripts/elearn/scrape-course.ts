@@ -278,6 +278,46 @@ async function downloadActivityFiles(
     return saved;
   }
 
+  // Moodle's "url" activity type (external link resources) sometimes
+  // shows an interstitial "you are leaving this site, continue?" page
+  // instead of redirecting immediately — confirmed by the user manually
+  // clicking through "Course Outline" and finding it took two clicks,
+  // not one. Detected generically: after the first navigation we're
+  // still on elearn.isb.edu itself (a genuine external destination would
+  // have already left it), so look for a continue-style link and follow
+  // it once. Everything below (direct-file-view check, strategies 1/2)
+  // then naturally re-evaluates against wherever that second click lands.
+  if (activity.type === "url" && new URL(page.url()).hostname === "elearn.isb.edu") {
+    const continueHref = await page.evaluate(() => {
+      const workaround = document.querySelector<HTMLAnchorElement>(".urlworkaround a");
+      if (workaround) return workaround.getAttribute("href");
+      const byText = Array.from(document.querySelectorAll("a")).find((a) =>
+        /continue/i.test(a.textContent || "")
+      );
+      return byText ? byText.getAttribute("href") : null;
+    });
+    if (continueHref) {
+      const continueDownloadPromise = page
+        .waitForEvent("download", { timeout: 5000 })
+        .catch(() => null);
+      try {
+        await page.goto(resolveUrl(continueHref), { waitUntil: "domcontentloaded" });
+      } catch (err) {
+        if (!(err instanceof Error && /Download is starting/i.test(err.message))) throw err;
+      }
+      const continueDownload = await continueDownloadPromise;
+      if (continueDownload) {
+        const filename = cleanFilename(continueDownload.suggestedFilename());
+        await continueDownload.saveAs(path.join(destDir, filename));
+        saved.push(filename);
+        console.log(`    ↓ ${filename} (via continue link)`);
+        return saved;
+      }
+      // No download fired — fall through, the checks below now run
+      // against whatever page that continue link actually landed on.
+    }
+  }
+
   // The page "rendered", but as the browser's own file viewer rather
   // than a Moodle page — the current URL (after any redirects) IS the
   // file. Fetch it directly instead of scanning what's just viewer UI.
