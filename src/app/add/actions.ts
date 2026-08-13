@@ -10,7 +10,7 @@ const FILES_ROOT = path.join(process.cwd(), "files", "inbox");
 
 const EXT_TO_FORMAT: Record<
   string,
-  "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV"
+  "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV" | "HTML"
 > = {
   ".pptx": "PPTX",
   ".pdf": "PDF",
@@ -21,6 +21,8 @@ const EXT_TO_FORMAT: Record<
   ".docx": "DOCX",
   ".xlsx": "XLSX",
   ".csv": "CSV",
+  ".html": "HTML",
+  ".htm": "HTML",
 };
 
 // Real file storage, real DB rows — but this does NOT run any AI

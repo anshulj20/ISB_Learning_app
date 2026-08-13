@@ -26,7 +26,7 @@ import type { Page, BrowserContext } from "playwright";
 import { getLoggedInPage, ELEARN_BASE, db, slugify, politeDelay, resolveUrl } from "./shared";
 
 type FileKind = "SLIDES" | "NOTES" | "CASE" | "ASSIGNMENT";
-type FileFormat = "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV";
+type FileFormat = "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC" | "DOCX" | "XLSX" | "CSV" | "HTML";
 
 const EXT_TO_FORMAT: Record<string, FileFormat> = {
   ".pptx": "PPTX",
@@ -38,7 +38,20 @@ const EXT_TO_FORMAT: Record<string, FileFormat> = {
   ".docx": "DOCX",
   ".xlsx": "XLSX",
   ".csv": "CSV",
+  ".html": "HTML",
+  ".htm": "HTML",
 };
+
+// Single source of truth for which Moodle activity types we look for —
+// used by BOTH the discovery pass and the coverage self-check. Keeping
+// these as one shared list, not two copies, is deliberate: two separate
+// lists drifting apart is exactly how "Course Outline" and "Course Pack"
+// went unnoticed by both the scraper AND its own self-check — both used
+// the same incomplete list, so the check couldn't catch what the
+// discovery pass couldn't see either. "url" = Moodle's URL/link resource
+// type; some courses use it for the course outline/coursepack instead of
+// a plain file resource.
+const WANTED_MOD_TYPES = ["resource", "folder", "assign", "url", "turnitintooltwo", "turnitintool"];
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -133,14 +146,7 @@ async function listActivities(page: Page, courseId: string): Promise<Activity[]>
   });
   await expandAllSections(page);
 
-  return page.$$eval("a[href*='/mod/']", (links) => {
-    // turnitintooltwo/turnitintool = Moodle's Turnitin plugin, for
-    // courses that route submissions through Turnitin instead of a
-    // plain "assign" activity. Untested — no course scraped so far has
-    // used it, so the download strategies may need adjusting once one
-    // actually does (Turnitin's own submission-inbox UI is more complex
-    // than a plain Moodle assign page).
-    const wanted = ["resource", "folder", "assign", "turnitintooltwo", "turnitintool"];
+  return page.$$eval("a[href*='/mod/']", (links, wanted) => {
     const seen = new Map<string, { type: string; id: string; name: string; href: string }>();
     for (const a of links) {
       const href = a.getAttribute("href") ?? "";
@@ -155,7 +161,7 @@ async function listActivities(page: Page, courseId: string): Promise<Activity[]>
       }
     }
     return Array.from(seen.values());
-  });
+  }, WANTED_MOD_TYPES);
 }
 
 function guessKind(activityType: string, filename: string): FileKind {
@@ -393,12 +399,11 @@ async function auditCoverage(
     links.map((a) => a.getAttribute("href") || "")
   );
 
-  const wanted = ["resource", "folder", "assign", "turnitintooltwo", "turnitintool"];
   const modKeysOnPage = new Set<string>();
   const fileUrlsOnPage = new Set<string>();
   for (const href of allHrefs) {
     const modMatch = href.match(/\/mod\/(\w+)\/view\.php\?id=(\d+)/);
-    if (modMatch && wanted.includes(modMatch[1])) {
+    if (modMatch && WANTED_MOD_TYPES.includes(modMatch[1])) {
       modKeysOnPage.add(`${modMatch[1]}-${modMatch[2]}`);
     }
     if (href.includes("pluginfile.php")) fileUrlsOnPage.add(href);

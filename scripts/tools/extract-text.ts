@@ -39,6 +39,32 @@ async function extractXlsx(filePath: string): Promise<string> {
   return out;
 }
 
+async function extractHtml(filePath: string): Promise<string> {
+  const { convert } = await import("html-to-text");
+  let buf = await readFile(filePath, "utf-8");
+
+  // Some of these (math-heavy practice problems especially) embed the
+  // actual content as a base64 data-URI image rather than real text —
+  // html-to-text has nothing useful to do with that, so it dumps the
+  // raw base64 blob into the output (tens of KB of noise, no content).
+  // Strip data-URI images before converting, and say so plainly instead
+  // of silently losing the fact that this file's real content wasn't
+  // extractable this way at all.
+  const imgCount = (buf.match(/<img[^>]*src=["']data:image/gi) || []).length;
+  buf = buf.replace(/<img[^>]*src=["']data:image[^"']*["'][^>]*>/gi, "[embedded image — not extracted]");
+
+  const text = convert(buf, { wordwrap: false });
+  if (imgCount > 0) {
+    return (
+      `[NOTE: ${imgCount} embedded image(s) in this file were not extracted as text — ` +
+      `likely math/diagrams rendered as images. View them directly if the text below ` +
+      `looks incomplete: open the .html file's source, find the data:image URIs, or ` +
+      `re-check with the raw file in a browser.]\n\n${text}`
+    );
+  }
+  return text;
+}
+
 async function main() {
   const filePath = process.argv[2];
   if (!filePath) {
@@ -50,6 +76,7 @@ async function main() {
   if (ext === ".pdf") text = await extractPdf(filePath);
   else if (ext === ".docx") text = await extractDocx(filePath);
   else if (ext === ".xlsx") text = await extractXlsx(filePath);
+  else if (ext === ".html" || ext === ".htm") text = await extractHtml(filePath);
   else {
     console.error("Unsupported extension:", ext);
     process.exit(1);
