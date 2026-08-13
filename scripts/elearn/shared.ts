@@ -93,6 +93,15 @@ export async function getLoggedInPage(): Promise<{
   return { context, page };
 }
 
+// ISB's Moodle theme renders some hrefs as full absolute URLs and others
+// as relative paths — inconsistently. Blindly prepending ELEARN_BASE to
+// an already-absolute URL produces a mangled
+// "https://elearn.isb.eduhttps://elearn.isb.edu/..." address. Always
+// resolve through this instead of string-concatenating ELEARN_BASE.
+export function resolveUrl(href: string): string {
+  return href.startsWith("http") ? href : `${ELEARN_BASE}${href}`;
+}
+
 export function slugify(name: string): string {
   return name
     .toLowerCase()

@@ -16,7 +16,7 @@
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import type { Page, BrowserContext } from "playwright";
-import { getLoggedInPage, ELEARN_BASE, db, slugify, politeDelay } from "./shared";
+import { getLoggedInPage, ELEARN_BASE, db, slugify, politeDelay, resolveUrl } from "./shared";
 
 type FileKind = "SLIDES" | "NOTES" | "CASE" | "ASSIGNMENT";
 type FileFormat = "PPTX" | "PDF" | "JPG" | "PNG" | "HEIC";
@@ -104,7 +104,7 @@ async function downloadActivityFiles(
   destDir: string,
   debug: boolean
 ): Promise<string[]> {
-  await page.goto(`${ELEARN_BASE}${activity.href}`, { waitUntil: "domcontentloaded" });
+  await page.goto(resolveUrl(activity.href), { waitUntil: "domcontentloaded" });
   const saved: string[] = [];
 
   // Strategy 1: anything that looks like a direct file/download link on
@@ -117,7 +117,7 @@ async function downloadActivityFiles(
   for (const href of new Set(candidateLinks)) {
     try {
       const downloadPromise = page.waitForEvent("download", { timeout: 4000 });
-      await page.goto(href.startsWith("http") ? href : `${ELEARN_BASE}${href}`, {
+      await page.goto(resolveUrl(href), {
         waitUntil: "domcontentloaded",
       }).catch(() => {}); // navigation may be interrupted by the download itself — fine
       const download = await downloadPromise.catch(() => null);
@@ -137,7 +137,7 @@ async function downloadActivityFiles(
   // Strategy 2: direct fetch of any pluginfile.php URL still visible on
   // the (possibly navigated-away) activity page, for inline-displayed
   // files strategy 1 didn't catch.
-  await page.goto(`${ELEARN_BASE}${activity.href}`, { waitUntil: "domcontentloaded" });
+  await page.goto(resolveUrl(activity.href), { waitUntil: "domcontentloaded" });
   const fileUrls = await page.$$eval(
     "a[href*='pluginfile.php'], iframe[src*='pluginfile.php'], object[data*='pluginfile.php']",
     (els) =>
@@ -149,7 +149,7 @@ async function downloadActivityFiles(
     const filename = decodeURIComponent(url.split("/").pop() ?? "file");
     if (saved.includes(filename)) continue;
     try {
-      const resp = await context.request.get(url.startsWith("http") ? url : `${ELEARN_BASE}${url}`);
+      const resp = await context.request.get(resolveUrl(url));
       if (resp.ok()) {
         const buf = await resp.body();
         await writeFile(path.join(destDir, filename), buf);
