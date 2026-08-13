@@ -16,7 +16,7 @@ export function Nav({ topicCount }: { topicCount: number }) {
   const pathname = usePathname();
 
   return (
-    <nav className="w-48 shrink-0 border-r border-divider bg-surface flex flex-col justify-between py-6 px-4">
+    <nav className="w-48 shrink-0 border-r border-divider bg-surface flex flex-col justify-between py-6 px-4 sticky top-0 h-screen overflow-y-auto">
       <div>
         <Link
           href="/"
