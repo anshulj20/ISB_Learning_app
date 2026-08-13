@@ -203,7 +203,7 @@ else is fair game.
 
 | ID | Course | Term | Status |
 |---|---|---|---|
-| 10563 | Summer Internship | Summer Internship | not scraped |
+| ~~10563~~ | ~~Summer Internship~~ | Summer Internship | **skip — user excluded** |
 | 9916 | Statistics (Section: A & B) | Term 1 | **done, Phase-1 processed** |
 | 9915 | Fundamentals of Economics | Term 1 | not scraped |
 | 9914 | Financial Accounting for Managers | Term 1 | not scraped |
