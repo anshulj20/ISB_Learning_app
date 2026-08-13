@@ -118,11 +118,12 @@ lot of iteration against the real site:
 - `scripts/tools/extract-text.ts <file>` — PDF/DOCX/XLSX → plain text,
   for Phase-1 reading (see below).
 
-**Bugs found and fixed this session** (all via the coverage-check +
-debug-screenshot workflow, not guessing): login-detection race
-condition (declared success the instant the SSO button was clicked, not
-when login actually finished), mangled URLs from blindly prepending the
-base URL to already-absolute hrefs, a `tsx`/Playwright `page.evaluate()`
+**Bugs found and fixed this session** (nearly all via the coverage-check
++ debug-screenshot workflow or the user directly clicking through the
+real site and comparing — not guessing): login-detection race condition
+(declared success the instant the SSO button was clicked, not when
+login actually finished), mangled URLs from blindly prepending the base
+URL to already-absolute hrefs, a `tsx`/Playwright `page.evaluate()`
 incompatibility (`__name is not defined` — tsx transpiles with
 esbuild's keepNames, which breaks when a function's source is
 serialized and run standalone in the browser), a crash on
@@ -131,8 +132,18 @@ error, not an event), filenames keeping their `?forcedownload=1` query
 string (Windows rejects `?` in filenames), the collapsed-accordion-
 sections + inline-folder-files gap described above, a heading-detection
 bug where a file's own name matched the heading regex and got read as
-its own section label, and the duplicate-course-row bug from Moodle's
-invisible title characters.
+its own section label, the duplicate-course-row bug from Moodle's
+invisible title characters, `.html`-format resources (practice
+problems/answer keys) silently skipped from the DB, `mod/url` activities
+("Course Outline"/"Course Pack") invisible to a wanted-types list that
+both the discovery pass AND its own coverage-check shared a copy of (so
+neither could catch what the other couldn't see either — fixed by
+making it one shared constant), and a `mod/url` "leaving this site,
+continue?" interstitial that needed a second hop to reach the real file
+(caught by the user manually clicking through it and comparing — the
+scraper's own checks didn't catch this one, worth remembering that the
+coverage-check only validates against patterns it already knows to look
+for, not "everything a human would find by clicking around").
 
 ## Real content currently in the app
 
