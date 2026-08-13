@@ -10,6 +10,13 @@
 // run for real. Run with --debug to get screenshots when something
 // doesn't match what was expected.
 //
+// Every run automatically saves a full-page screenshot of the course
+// page (_course-page-snapshot.png in the course's files/ folder) and
+// runs a coverage check at the end comparing everything found on the
+// page against everything actually processed — this is what caught the
+// collapsed-sections bug in the first place, now built in rather than
+// needing a human to notice and compare manually each time.
+//
 // Usage:
 //   npm run elearn:scrape -- <courseId> --term "Term 2" [--course "Override Name"] [--debug]
 
@@ -332,6 +339,69 @@ async function downloadActivityFiles(
   return saved;
 }
 
+// A full-page screenshot of the (expanded) course page, taken every run
+// — not just on failure. This is what let us catch the collapsed-
+// sections bug in the first place (the user manually printed the page
+// and compared it against what got scraped); doing it automatically
+// means that comparison doesn't require a human every time.
+async function snapshotCoursePage(page: Page, courseId: string, destDir: string): Promise<void> {
+  const shotPath = path.join(destDir, "_course-page-snapshot.png");
+  await page.screenshot({ path: shotPath, fullPage: true });
+  console.log(`  Course page snapshot: ${shotPath}`);
+}
+
+// Re-scans the course page for every /mod/ activity link and every
+// pluginfile.php link, and reports anything found there that was never
+// actually processed by the two discovery passes above. Doesn't
+// guarantee full coverage (something could still be missed by BOTH the
+// wanted-activity-types list and the pluginfile.php pattern — e.g. a
+// module type genuinely not in that list), but it catches the class of
+// bug that actually happened here: something present on the page but
+// silently dropped by the code that was supposed to find it.
+async function auditCoverage(
+  page: Page,
+  courseId: string,
+  processedModKeys: Set<string>,
+  processedFileUrls: Set<string>
+): Promise<void> {
+  await page.goto(`${ELEARN_BASE}/course/view.php?id=${courseId}`, { waitUntil: "domcontentloaded" });
+  await expandAllSections(page);
+
+  const allHrefs = await page.$$eval("a[href]", (links) =>
+    links.map((a) => a.getAttribute("href") || "")
+  );
+
+  const wanted = ["resource", "folder", "assign", "turnitintooltwo", "turnitintool"];
+  const modKeysOnPage = new Set<string>();
+  const fileUrlsOnPage = new Set<string>();
+  for (const href of allHrefs) {
+    const modMatch = href.match(/\/mod\/(\w+)\/view\.php\?id=(\d+)/);
+    if (modMatch && wanted.includes(modMatch[1])) {
+      modKeysOnPage.add(`${modMatch[1]}-${modMatch[2]}`);
+    }
+    if (href.includes("pluginfile.php")) fileUrlsOnPage.add(href);
+  }
+
+  const missedActivities = [...modKeysOnPage].filter((k) => !processedModKeys.has(k));
+  const missedFiles = [...fileUrlsOnPage].filter((u) => !processedFileUrls.has(u));
+
+  console.log(`\nCoverage check:`);
+  console.log(`  Activities: ${modKeysOnPage.size} on the page, ${processedModKeys.size} processed.`);
+  console.log(`  Inline files: ${fileUrlsOnPage.size} on the page, ${processedFileUrls.size} processed.`);
+  if (missedActivities.length === 0 && missedFiles.length === 0) {
+    console.log(`  ✓ Everything found on the page was processed.`);
+  } else {
+    if (missedActivities.length > 0) {
+      console.log(`  ⚠ ${missedActivities.length} activity link(s) on the page were never processed:`);
+      for (const k of missedActivities) console.log(`    - ${k}`);
+    }
+    if (missedFiles.length > 0) {
+      console.log(`  ⚠ ${missedFiles.length} file link(s) on the page were never processed:`);
+      for (const u of missedFiles) console.log(`    - ${u}`);
+    }
+  }
+}
+
 async function scrapeGrades(page: Page, courseId: string, destDir: string) {
   await page.goto(`${ELEARN_BASE}/grade/report/user/index.php?id=${courseId}`, {
     waitUntil: "domcontentloaded",
@@ -392,10 +462,15 @@ async function main() {
 
   const destDir = path.join(process.cwd(), "files", "elearn", slugify(scrapedCourseName));
   await mkdir(destDir, { recursive: true });
+  await snapshotCoursePage(page, courseId, destDir);
+
+  const processedModKeys = new Set<string>();
+  const processedFileUrls = new Set<string>();
 
   let totalFiles = 0;
   for (const activity of activities) {
     console.log(`\n  [${activity.type}] ${activity.name}`);
+    processedModKeys.add(`${activity.type}-${activity.id}`);
     const filenames = await downloadActivityFiles(page, context, activity, destDir, debug);
     for (const filename of filenames) {
       const format = guessFormat(filename);
@@ -439,6 +514,7 @@ async function main() {
   console.log(`Found ${inlineFiles.length} inline file(s) across ${new Set(inlineFiles.map((f) => f.section)).size} section(s).`);
 
   for (const { url, section } of inlineFiles) {
+    processedFileUrls.add(url);
     const filename = cleanFilename(url);
     const sectionDir = path.join(destDir, slugify(section));
     const storedPath = path.join("files", "elearn", slugify(scrapedCourseName), slugify(section), filename);
@@ -484,6 +560,8 @@ async function main() {
 
   console.log(`\nGrades:`);
   await scrapeGrades(page, courseId, destDir);
+
+  await auditCoverage(page, courseId, processedModKeys, processedFileUrls);
 
   console.log(`\n✓ Done. ${totalFiles} file(s) saved to ${destDir} and queued in the app.`);
   console.log(`  Review kind/confidence during Phase-1 processing — guesses here are rough.`);
